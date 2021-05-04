@@ -40,8 +40,9 @@ print('Mean MAE: %.3f (%.3f)' % (scores.mean(), scores.std()) )
 ypred = xgbr.predict(xtest)
 
 mse = mean_squared_error(ytest, ypred)
+rmse = mean_squared_error(ytest, ypred, squared=False)
 print("MSE: %.2f" % mse)
-print("RMSE: %.2f" % (mse**(1/2.0)))
+print("RMSE: %.2f" % rmse)
 
 predictions = [round(value) for value in ypred]
 # evaluate predictions

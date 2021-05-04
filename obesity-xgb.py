@@ -1,55 +1,47 @@
+import xgboost as xgb
 import numpy as np
-from pandas import read_csv
-import xgb_test as xgb
-from sklearn.model_selection import train_test_split
-from sklearn.model_selection import cross_val_score, KFold, RepeatedKFold
-from sklearn.metrics import mean_squared_error
-from sklearn.metrics import accuracy_score
-from sklearn.preprocessing import LabelEncoder
-from sklearn.preprocessing import OrdinalEncoder
-from sklearn.preprocessing import OneHotEncoder
+import csv, math
 import matplotlib.pyplot as plt
+from pandas import read_csv, DataFrame
+from sklearn.model_selection import train_test_split, cross_val_score, RepeatedKFold, cross_val_predict
+from sklearn.metrics import mean_squared_error, accuracy_score
+from sklearn.preprocessing import LabelEncoder,OneHotEncoder, MinMaxScaler
+from sklearn.compose import ColumnTransformer
 
-data = read_csv('C:\\Users\GUSTAVOJEREZ\PycharmProjects\XGBOOST\obesity.csv', header=None)
-dataset = data.values
+dataframe = read_csv('C:/Users/GUSTAVOJEREZ/PycharmProjects/XGBOOST/datos.csv', header=None)
+data = dataframe.values
+X = data[:, :-1]
+Y = data[:, -1]
 
-X = dataset[:, :-1].astype(str)
-Y = dataset[:, -1]
-
-encoded_x = None
-for i in range(8, X.shape[1]):
-	label_encoder = LabelEncoder()
-	feature = label_encoder.fit_transform(X[:,i])
-	feature = feature.reshape(X.shape[0], 1)
-	onehot_encoder = OneHotEncoder(sparse=False, categories='auto')
-	feature = onehot_encoder.fit_transform(feature)
-	if encoded_x is None:
-		encoded_x = feature
-	else:
-		encoded_x = np.concatenate((encoded_x, feature), axis=1)
+man = MinMaxScaler()
+t = [('num', man, [1,2,3,6,7,10,12,13]), ('cat', OneHotEncoder(), [0,4,5,8,9,11,14,15])]
+transformer = ColumnTransformer(transformers=t)
+X = transformer.fit_transform(X)
 
 label_encoder = LabelEncoder()
-label_encoded_y = label_encoder.fit_transform(Y)
+Y = label_encoder.fit_transform(Y)
 
-X = np.concatenate((X[:,:8],encoded_x),axis=1)
+xtrain, xtest, ytrain, ytest=train_test_split(X,Y, test_size=0.33)
 
-print('Input X', encoded_x.shape)
-print(encoded_x[:5, :])
-print('Output', label_encoded_y.shape)
-print(label_encoded_y[:5])
+xgbr = xgb.XGBRegressor()
 
-print('\n\n')
-#TRAINING PHASE
-xtrain, xtest, ytrain, ytest=train_test_split(encoded_x, label_encoded_y, test_size=0.2, random_state=7)
+eval_set = [(xtest,ytest)]
+xgbr.fit(xtrain, ytrain,eval_metric='rmse', eval_set=eval_set, early_stopping_rounds=10, verbose=False)
+#xgb.plot_importance(xgbr)
+#plt.show()
 
-xgbr = xgb.XGBRegressor(verbosity=0)
-
-#print(xgbr)
-
-xgbr.fit(xtrain, ytrain)
+importance = xgbr.feature_importances_
+# summarize feature importance
+for i,v in enumerate(importance):
+	print('Feature: %0d, Score: %.5f' % (i,v))
+# plot feature importance
+plt.bar([x for x in range(len(importance))], importance)
+plt.show()
 
 score = xgbr.score(xtrain, ytrain)
-print("Training score: ", score)
+print("Training score: %.2f%%" % (score * 100.0))
+tscore = xgbr.score(xtest, ytest)
+print("Test score: %.2f%%" % (tscore * 100.0))
 
 cv = RepeatedKFold(n_splits=10, n_repeats=3, random_state=1)
 # evaluate model
@@ -58,32 +50,40 @@ scores = cross_val_score(xgbr, xtrain, ytrain, scoring='neg_mean_absolute_error'
 scores = np.absolute(scores)
 print('Mean MAE: %.3f (%.3f)' % (scores.mean(), scores.std()) )
 
-#PREDICTION PHASE
 ypred = xgbr.predict(xtest)
 
 mse = mean_squared_error(ytest, ypred)
+rmse = mean_squared_error(ytest, ypred, squared=False)
 print("MSE: %.2f" % mse)
-print("RMSE: %.2f" % (mse**(1/2.0)))
+print("RMSE: %.2f" % rmse)
 
 predictions = [round(value) for value in ypred]
 # evaluate predictions
 accuracy = accuracy_score(ytest, predictions)
 print("Accuracy: %.2f%%" % (accuracy * 100.0))
 
-print('------------------------------------\n')
-print('test ->', ytest)
-print('pred ->', ypred)
+metrics = [['TrainingScore', 'TestScore', 'MAE','STD','MES', 'RMSE', 'Acuraccy'],
+           [score,tscore,scores.mean(),scores.std(),mse,rmse,accuracy]]
 
-x_ax = range(len(ytest))
-plt.plot(x_ax, ytest, label="original")
-plt.plot(x_ax, predictions, label="predicted")
-plt.title("Obesity levels test and predicted data")
-plt.legend()
-#plt.show()
+with open('metrics.csv', 'w+', newline='') as file:
+    writer = csv.writer(file)
+    writer.writerows(metrics)
 
-fig, ax = plt.subplots()
-ax.scatter(ytest, predictions)
-ax.plot([ytest.min(), ytest.max()], [ytest.min(), ytest.max()], 'k--', lw=4)
-ax.set_xlabel('Measured')
-ax.set_ylabel('Predicted')
-plt.show()
+#Nivel de obesidad predicho
+predictions2 = []
+for i in range(0, len(ypred)):
+    if ypred[i] > 0:
+        predictions2.append(math.floor(ypred[i]))
+    else:
+        predictions2.append(math.ceil(ypred[i]))
+
+NObesity = label_encoder.inverse_transform(predictions2)
+results = [['Data','Test','Predicted','Error','NObesity']]
+error = []
+for i in range(0, ytest.shape[0]):
+    error.append(abs(ytest[i]-ypred[i]))
+    results.append([i,ytest[i],ypred[i],error[i],NObesity[i]])
+
+with open('results.csv', 'w+', newline='') as file:
+    writer = csv.writer(file)
+    writer.writerows(results)
